@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Progress App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body{margin:0;background:#0f1115;color:#e7ecf3;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto}
+    .wrap{max-width:900px;margin:0 auto;padding:18px}
+    h1{margin:0 0 12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input[type="text"]{flex:1;background:#0e121a;border:1px solid #222a39;color:#e7ecf3;border-radius:10px;padding:10px 12px}
+    .card{background:#151922;border:1px solid #1d2330;border-radius:14px;padding:14px;margin-top:12px}
+    .item{display:flex;gap:10px;align-items:flex-start;border-top:1px solid #1d2330;padding:10px 0}
+    .item:first-child{border-top:0}
+    .title{font-weight:600}
+    .meta{font-size:13px;color:#8b93a7}
+    .progress{height:10px;background:#0e121a;border:1px solid #273042;border-radius:999px;overflow:hidden}
+    .bar{height:100%;width:0;background:linear-gradient(90deg,#c2886c,#d9a88f);transition:width .2s}
+    button{border:0;background:#c2886c;color:#1a0f0b;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+    button.ghost{background:transparent;color:#cbd3e3;border:1px dashed #2a3244}
+    .muted{color:#8b93a7}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Трекер прогресса</h1>
+    <div class="row" style="justify-content:space-between">
+      <div style="flex:1;min-width:240px">
+        <div class="progress"><div class="bar" id="bar"></div></div>
+        <div class="muted" id="progress-text" style="margin-top:6px">0% выполнено</div>
+      </div>
+      <div class="row">
+        <button id="share" style="display:none">Поделиться прогрессом</button>
+        <button id="export" class="ghost">Экспорт</button>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <input id="search" type="text" placeholder="Поиск по названию…">
+      <button id="mark-all" class="ghost">Отметить всё</button>
+      <button id="unmark-all" class="ghost">Снять всё</button>
+    </div>
+
+    <div class="card" id="list"></div>
+  </div>
+
+  <script>
+    // ====== ТВОИ ПУНКТЫ (можешь отредактировать) ======
+    const DATA = [
+      { title: "Этап 1", desc: "Вводное" },
+      { title: "Этап 2", desc: "Настройка окружения" },
+      { title: "Этап 3", desc: "Практика" }
+    ];
+
+    // ====== Telegram Mini App init ======
+    const tg = window.Telegram?.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+    const uid = tg?.initDataUnsafe?.user?.id ?? "guest";
+    const STORAGE_KEY = "progress_" + uid;
+
+    // ====== State ======
+    let progress = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+
+    // ====== UI refs ======
+    const listEl = document.getElementById("list");
+    const barEl = document.getElementById("bar");
+    const progTextEl = document.getElementById("progress-text");
+    const searchEl = document.getElementById("search");
+    const shareBtn = document.getElementById("share");
+    const exportBtn = document.getElementById("export");
+
+    // ====== Render ======
+    function filtered() {
+      const q = searchEl.value.toLowerCase().trim();
+      return DATA.filter(x => x.title.toLowerCase().includes(q));
+    }
+
+    function render() {
+      const rows = filtered();
+      listEl.innerHTML = "";
+      rows.forEach((r, idx) => {
+        const key = r.title;
+        const done = !!progress[key];
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <input type="checkbox" ${done ? "checked" : ""} />
+          <div style="flex:1">
+            <div class="title">${escapeHtml(r.title)}</div>
+            ${r.desc ? `<div class="meta">${escapeHtml(r.desc)}</div>` : ""}
+          </div>
+        `;
+        const cb = div.querySelector("input");
+        cb.addEventListener("change", () => {
+          progress[key] = cb.checked;
+          persist(); updateProgress();
+        });
+        listEl.appendChild(div);
+      });
+      updateProgress();
+    }
+
+    function updateProgress() {
+      const total = DATA.length;
+      const done = DATA.reduce((a, r) => a + (progress[r.title] ? 1 : 0), 0);
+      const pct = total ? Math.round(done / total * 100) : 0;
+      barEl.style.width = pct + "%";
+      progTextEl.textContent = `${pct}% выполнено`;
+    }
+
+    function persist() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+    }
+
+    // Search + bulk
+    searchEl.addEventListener("input", render);
+    document.getElementById("mark-all").addEventListener("click", () => {
+      DATA.forEach(r => progress[r.title] = true); persist(); render();
+    });
+    document.getElementById("unmark-all").addEventListener("click", () => {
+      DATA.forEach(r => progress[r.title] = false); persist(); render();
+    });
+
+    // Export JSON
+    exportBtn.addEventListener("click", () => {
+      const total = DATA.length;
+      const done = DATA.reduce((a, r) => a + (progress[r.title] ? 1 : 0), 0);
+      const payload = { total, done, pct: total ? Math.round(done/total*100) : 0, byTitle: progress };
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'}));
+      a.download = 'progress.json'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 500);
+    });
+
+    // Share to bot (работает только внутри Telegram)
+    if (tg) {
+      shareBtn.style.display = "inline-block";
+      shareBtn.addEventListener("click", () => {
+        const total = DATA.length;
+        const done = DATA.reduce((a, r) => a + (progress[r.title] ? 1 : 0), 0);
+        const pct = total ? Math.round(done/total*100) : 0;
+        tg.sendData(JSON.stringify({ done, total, pct }));
+        tg.showPopup?.({ title: "Отправлено", message: `Прогресс: ${done}/${total} (${pct}%)` });
+      });
+    }
+
+    render();
+  </script>
+</body>
+</html>
